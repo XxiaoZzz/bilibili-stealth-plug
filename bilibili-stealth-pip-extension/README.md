@@ -1,0 +1,61 @@
+# Bilibili Stealth Picture-in-Picture Extension
+
+这个扩展不再使用 Chrome 自带 PiP 外壳，而是把当前 B 站视频链接发送给本地 Electron 透明小窗。真正的透明效果由原生窗口实现。
+
+## 必须先启动本地透明小窗
+
+在终端运行：
+
+```bash
+cd "你的项目路径/bilibili-stealth-pip-native"
+npm install
+npm start
+```
+
+看到下面日志说明本地桥接已启动：
+
+```text
+[Bilibili Stealth PiP Native] listening on http://127.0.0.1:39877
+```
+
+## 安装扩展
+
+1. 打开 Chrome 或 Edge。
+2. 进入 `chrome://extensions/` 或 `edge://extensions/`。
+3. 打开“开发者模式”。
+4. 点击“加载已解压的扩展程序”。
+5. 选择目录：
+
+```text
+你的项目路径/bilibili-stealth-pip-extension
+```
+
+## 使用
+
+1. 保持本地 Electron 程序运行。
+2. 打开 B 站视频页，例如 `https://www.bilibili.com/video/BV12ZFoe8Ek4/`。
+3. 刷新页面，等播放器加载完成。
+4. 在播放器底部控制栏点击“透明”按钮。
+5. Electron 会打开一个置顶、无边框、透明背景的小窗并加载当前视频。
+6. 鼠标移出小窗：整个原生窗口透明度降到 `0`。
+7. 鼠标移回小窗：窗口透明度恢复到 `1`。
+
+## 说明
+
+- 这版是真正控制原生窗口透明度，不依赖 Chrome PiP 外壳。
+- 扩展会把当前播放进度追加到 URL 的 `t=` 参数，并在交接成功后暂停原 Chrome 页面的视频，避免双重播放。
+- 如果小窗里 B 站没有自动播放，移动鼠标回小窗后手动点播放即可。
+- 完全透明后如果一时找不到窗口，可以按 `CommandOrControl+Shift+B` 强制恢复显示。
+- 如果点击“透明”后提示本地小窗未启动，说明 `npm start` 没有运行或端口 `39877` 被占用。
+
+## 2026-05-02 修复
+
+鼠标移出检测已经改为 Electron 主进程轮询屏幕鼠标坐标和窗口边界，不再依赖网页里的 `mouseleave` 事件。更新代码后必须停止旧的 `npm start` 进程并重新启动，否则仍会运行旧逻辑。
+
+## 小窗控制条
+
+鼠标移入透明小窗后，底部会出现自定义控制条：
+
+- `播放/暂停`：控制小窗内视频播放状态。
+- 进度条：显示当前播放进度，拖动可跳转。
+- `弹幕开/弹幕关`：优先用本地 CSS 隐藏/显示 B 站弹幕层；如果 B 站之后改了弹幕 DOM，可能需要再补选择器。

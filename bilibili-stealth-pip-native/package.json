@@ -1,0 +1,14 @@
+{
+  "name": "bilibili-stealth-pip-native",
+  "version": "0.1.0",
+  "description": "Native transparent always-on-top helper for Bilibili stealth PiP.",
+  "main": "src/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "check": "node --check src/main.js && node --check src/preload.js"
+  },
+  "devDependencies": {
+    "electron": "latest"
+  }
+}

@@ -1,0 +1,21 @@
+# dependencies
+bilibili-stealth-pip-native/node_modules/
+
+# runtime logs
+bilibili-stealth-pip-native/native.log
+*.log
+
+# local packaged artifacts
+*.zip
+
+# macOS / Windows noise
+.DS_Store
+Thumbs.db
+
+# temporary planning/session files
+task_plan.md
+findings.md
+progress.md
+# unrelated local harness and internal planning artifacts
+browser-harness/
+docs/superpowers/

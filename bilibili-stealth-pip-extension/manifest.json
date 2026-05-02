@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Bilibili Stealth Picture-in-Picture",
+  "version": "0.3.0",
+  "description": "Sends Bilibili videos to a local native transparent always-on-top stealth window.",
+  "minimum_chrome_version": "116",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.bilibili.com/video/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "styles.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "permissions": [],
+  "host_permissions": [
+    "http://127.0.0.1:39877/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}
