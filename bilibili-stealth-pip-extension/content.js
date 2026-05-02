@@ -98,7 +98,7 @@
         sourceVideo.pause();
       }
 
-      showToast('已交给本地透明小窗：移出小窗后窗口整体透明，移回恢复。');
+      showToast('已交给本地透明小窗：移出后透明并暂停，移回后恢复播放。');
     } catch (error) {
       setButtonActive(false);
       console.error('[Bilibili Native Stealth PiP] Failed to open native helper:', error);

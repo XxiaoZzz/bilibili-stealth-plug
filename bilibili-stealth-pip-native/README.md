@@ -33,8 +33,8 @@ POST http://127.0.0.1:39877/open
 ## 透明行为
 
 - 窗口属性：`transparent: true`、`frame: false`、`alwaysOnTop: true`
-- 鼠标移出：`win.setOpacity(0)`
-- 鼠标移入：`win.setOpacity(1)`
+- 鼠标移出：`win.setOpacity(0)`，并暂停当前视频
+- 鼠标移入：`win.setOpacity(1)`，并恢复播放由隐身模式自动暂停的视频
 
 完全透明后如果一时找不到窗口，可以按 `CommandOrControl+Shift+B` 强制恢复显示。
 

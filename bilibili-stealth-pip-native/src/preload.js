@@ -9,6 +9,8 @@ const STATE = {
   scrubbing: false,
   danmakuVisible: true,
   userPaused: false,
+  stealthAutoPaused: false,
+  suppressNextPauseAsUser: false,
   boundVideo: null
 };
 
@@ -348,13 +350,68 @@ function updateControlBar() {
   }
 }
 
-function setHidden(hidden) {
-  if (STATE.hidden === hidden) {
+function pauseForStealthHide() {
+  const video = getVideo();
+  bindVideoEvents();
+  if (!video || video.paused || video.ended) {
+    STATE.stealthAutoPaused = false;
     return;
   }
-  STATE.hidden = hidden;
-  document.documentElement.classList.toggle('bspip-native-hidden', hidden);
-  ipcRenderer.send('stealth:set-hidden', hidden);
+
+  STATE.stealthAutoPaused = true;
+  STATE.suppressNextPauseAsUser = true;
+  video.pause();
+  updateControlBar();
+}
+
+function resumeAfterStealthReveal() {
+  const video = getVideo();
+  bindVideoEvents();
+  if (!video || !STATE.stealthAutoPaused) {
+    return;
+  }
+
+  STATE.stealthAutoPaused = false;
+  if (STATE.userPaused || video.ended) {
+    updateControlBar();
+    return;
+  }
+
+  video.play()
+    .then(() => {
+      STATE.autoClickAttempts = 999;
+      updateControlBar();
+    })
+    .catch(() => {
+      STATE.autoClickAttempts = 0;
+      tryClickBilibiliPlay();
+    });
+}
+
+function applyHiddenState(hidden) {
+  const nextHidden = Boolean(hidden);
+  if (STATE.hidden === nextHidden) {
+    return false;
+  }
+
+  STATE.hidden = nextHidden;
+  document.documentElement.classList.toggle('bspip-native-hidden', nextHidden);
+
+  if (nextHidden) {
+    pauseForStealthHide();
+  } else {
+    resumeAfterStealthReveal();
+  }
+
+  updateControlBar();
+  return true;
+}
+
+function setHidden(hidden) {
+  const changed = applyHiddenState(hidden);
+  if (changed) {
+    ipcRenderer.send('stealth:set-hidden', Boolean(hidden));
+  }
 }
 
 function bindMouseStealth() {
@@ -383,7 +440,13 @@ function bindVideoEvents() {
   });
 
   video.addEventListener('pause', () => {
-    if (!STATE.scrubbing && !video.ended && Number.isFinite(video.currentTime) && video.currentTime > 0.2) {
+    if (STATE.suppressNextPauseAsUser) {
+      STATE.suppressNextPauseAsUser = false;
+      updateControlBar();
+      return;
+    }
+
+    if (!STATE.hidden && !STATE.scrubbing && !video.ended && Number.isFinite(video.currentTime) && video.currentTime > 0.2) {
       STATE.userPaused = true;
       STATE.autoClickAttempts = 999;
     }
@@ -398,7 +461,7 @@ function bindVideoEvents() {
 function tryPlayVideo() {
   const video = getVideo();
   bindVideoEvents();
-  if (!video || STATE.userPaused) {
+  if (!video || STATE.userPaused || STATE.hidden) {
     return;
   }
 
@@ -419,6 +482,11 @@ function tryPlayVideo() {
 function tryClickBilibiliPlay() {
   bindVideoEvents();
   const video = getVideo();
+  if (STATE.hidden) {
+    updateControlBar();
+    return;
+  }
+
   if (video && !video.paused) {
     STATE.autoClickAttempts = 999;
     updateControlBar();
@@ -470,8 +538,7 @@ ipcRenderer.on('stealth:loaded', () => {
 });
 
 ipcRenderer.on('stealth:state', (_event, payload) => {
-  STATE.hidden = Boolean(payload?.hidden);
-  document.documentElement.classList.toggle('bspip-native-hidden', STATE.hidden);
+  applyHiddenState(Boolean(payload?.hidden));
 });
 
 if (document.readyState === 'loading') {
