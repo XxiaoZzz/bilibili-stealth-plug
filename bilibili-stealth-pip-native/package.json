@@ -10,5 +10,6 @@
   },
   "devDependencies": {
     "electron": "latest"
-  }
+  },
+  "license": "MIT"
 }
