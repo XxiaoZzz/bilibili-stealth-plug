@@ -27,6 +27,8 @@ let pointerWatchTimer = null;
 let pointerHidden = false;
 let forceVisibleUntil = 0;
 let keepAliveTimer = null;
+let activeSessionId = null;
+let lastPlaybackState = null;
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling');
@@ -73,6 +75,39 @@ function readRequestBody(request) {
     request.on('end', () => resolve(body));
     request.on('error', reject);
   });
+}
+
+
+function createSessionId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function getWindowPlaybackPayload() {
+  const hasWindow = Boolean(playerWindow && !playerWindow.isDestroyed());
+  return {
+    ok: true,
+    hasWindow,
+    sessionId: activeSessionId,
+    state: lastPlaybackState
+  };
+}
+
+function updatePlaybackState(payload = {}, reason = 'renderer') {
+  const currentTime = Number(payload.currentTime);
+  const duration = Number(payload.duration);
+  const playbackRate = Number(payload.playbackRate);
+
+  lastPlaybackState = {
+    sessionId: activeSessionId,
+    url: typeof payload.url === 'string' ? payload.url : playerWindow?.webContents.getURL() || lastLoadedUrl || '',
+    currentTime: Number.isFinite(currentTime) && currentTime >= 0 ? currentTime : null,
+    duration: Number.isFinite(duration) && duration > 0 ? duration : null,
+    paused: Boolean(payload.paused),
+    ended: Boolean(payload.ended),
+    playbackRate: Number.isFinite(playbackRate) && playbackRate > 0 ? playbackRate : null,
+    reason,
+    updatedAt: Date.now()
+  };
 }
 
 
@@ -234,6 +269,13 @@ function createPlayerWindow() {
 
 
   playerWindow.on('closed', () => {
+    if (lastPlaybackState) {
+      lastPlaybackState = {
+        ...lastPlaybackState,
+        reason: 'window-closed',
+        updatedAt: Date.now()
+      };
+    }
     stopPointerWatcher();
     playerWindow = null;
     lastLoadedUrl = null;
@@ -243,12 +285,21 @@ function createPlayerWindow() {
   return playerWindow;
 }
 
-async function openBilibiliVideo(rawUrl) {
+async function openBilibiliVideo(rawUrl, sessionId) {
   if (!isAllowedBilibiliUrl(rawUrl)) {
     throw new Error('only Bilibili video URLs are accepted');
   }
 
   const url = normalizeBilibiliUrl(rawUrl);
+  activeSessionId = typeof sessionId === 'string' && sessionId ? sessionId : createSessionId();
+  updatePlaybackState({
+    url,
+    currentTime: Number(new URL(url).searchParams.get('t')) || 0,
+    paused: false,
+    ended: false,
+    playbackRate: null
+  }, 'open');
+
   const win = createPlayerWindow();
   keepVisibleBriefly();
   win.show();
@@ -261,14 +312,14 @@ async function openBilibiliVideo(rawUrl) {
     });
   }
 
-  return { ok: true, url };
+  return { ok: true, url, sessionId: activeSessionId };
 }
 
 async function handleOpenRequest(request, response) {
   try {
     const body = await readRequestBody(request);
     const payload = body ? JSON.parse(body) : {};
-    const result = await openBilibiliVideo(payload.url);
+    const result = await openBilibiliVideo(payload.url, payload.sessionId);
     sendJson(response, 200, result);
   } catch (error) {
     sendJson(response, 400, {
@@ -296,7 +347,9 @@ function startBridgeServer() {
         ok: true,
         app: 'bilibili-stealth-pip-native',
         hasWindow: Boolean(playerWindow && !playerWindow.isDestroyed()),
-        hidden: pointerHidden
+        hidden: pointerHidden,
+        sessionId: activeSessionId,
+        playbackState: lastPlaybackState
       });
       return;
     }
@@ -308,11 +361,18 @@ function startBridgeServer() {
         ok: true,
         hasWindow: Boolean(playerWindow && !playerWindow.isDestroyed()),
         hidden: pointerHidden,
+        sessionId: activeSessionId,
         opacity: playerWindow && !playerWindow.isDestroyed() ? playerWindow.getOpacity() : null,
         cursor,
         bounds,
-        cursorInsideWindow: bounds ? pointInBounds(cursor, bounds) : false
+        cursorInsideWindow: bounds ? pointInBounds(cursor, bounds) : false,
+        playbackState: lastPlaybackState
       });
+      return;
+    }
+
+    if (request.method === 'GET' && requestUrl.pathname === '/playback-state') {
+      sendJson(response, 200, getWindowPlaybackPayload());
       return;
     }
     if (request.method === 'POST' && requestUrl.pathname === '/open') {
@@ -338,6 +398,14 @@ function startBridgeServer() {
 }
 
 
+
+ipcMain.on('stealth:playback-state', (event, payload) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win || win.isDestroyed() || win !== playerWindow) {
+    return;
+  }
+  updatePlaybackState(payload, payload?.reason || 'renderer');
+});
 
 ipcMain.on('stealth:set-hidden', (event, isHidden) => {
   const win = BrowserWindow.fromWebContents(event.sender);

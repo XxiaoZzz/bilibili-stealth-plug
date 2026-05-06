@@ -15,6 +15,7 @@ const STATE = {
   speedMenuOpen: false,
   stealthAutoPaused: false,
   suppressNextPauseAsUser: false,
+  lastPlaybackReportAt: 0,
   boundVideo: null
 };
 
@@ -242,6 +243,7 @@ function injectToolbar() {
   toolbar.addEventListener('click', (event) => {
     const action = event.target?.dataset?.action;
     if (action === 'close') {
+      reportPlaybackState('close-button', true);
       ipcRenderer.send('stealth:close');
     }
     if (action === 'minimize') {
@@ -327,6 +329,41 @@ function getVideo() {
   return document.querySelector('video');
 }
 
+function collectPlaybackState(reason) {
+  const video = getVideo();
+  if (!video) {
+    return {
+      reason,
+      url: location.href,
+      currentTime: null,
+      duration: null,
+      paused: true,
+      ended: false,
+      playbackRate: STATE.playbackRate
+    };
+  }
+
+  return {
+    reason,
+    url: location.href,
+    currentTime: Number.isFinite(video.currentTime) ? video.currentTime : null,
+    duration: Number.isFinite(video.duration) ? video.duration : null,
+    paused: video.paused,
+    ended: video.ended,
+    playbackRate: Number.isFinite(video.playbackRate) ? video.playbackRate : STATE.playbackRate
+  };
+}
+
+function reportPlaybackState(reason = 'update', force = false) {
+  const now = Date.now();
+  if (!force && now - STATE.lastPlaybackReportAt < 500) {
+    return;
+  }
+
+  STATE.lastPlaybackReportAt = now;
+  ipcRenderer.send('stealth:playback-state', collectPlaybackState(reason));
+}
+
 function formatTime(seconds) {
   if (!Number.isFinite(seconds) || seconds < 0) {
     return '--:--';
@@ -351,6 +388,7 @@ function seekFromProgress(progress) {
   const ratio = Math.min(Math.max(Number(progress.value) / 1000, 0), 1);
   video.currentTime = ratio * video.duration;
   updateControlBar();
+  reportPlaybackState('seek', true);
 }
 
 function formatPlaybackRate(rate) {
@@ -375,6 +413,8 @@ function setPlaybackRate(rate) {
   document.querySelectorAll('.bspip-native-speed-option').forEach((option) => {
     option.classList.toggle('is-active', Math.abs(Number(option.dataset.speed) - normalized) < 0.001);
   });
+
+  reportPlaybackState('rate-change');
 }
 
 function setSpeedMenuOpen(open) {
@@ -405,6 +445,7 @@ function togglePlay() {
     video.pause();
   }
   updateControlBar();
+  reportPlaybackState('toggle-play', true);
 }
 
 function setDanmakuVisible(visible) {
@@ -467,6 +508,7 @@ function pauseForStealthHide() {
   STATE.suppressNextPauseAsUser = true;
   video.pause();
   updateControlBar();
+  reportPlaybackState('stealth-hide', true);
 }
 
 function resumeAfterStealthReveal() {
@@ -486,6 +528,7 @@ function resumeAfterStealthReveal() {
     .then(() => {
       STATE.autoClickAttempts = 999;
       updateControlBar();
+      reportPlaybackState('stealth-reveal', true);
     })
     .catch(() => {
       STATE.autoClickAttempts = 0;
@@ -551,12 +594,14 @@ function bindVideoEvents() {
     STATE.userPaused = false;
     STATE.autoClickAttempts = 999;
     updateControlBar();
+    reportPlaybackState('play', true);
   });
 
   video.addEventListener('pause', () => {
     if (STATE.suppressNextPauseAsUser) {
       STATE.suppressNextPauseAsUser = false;
       updateControlBar();
+      reportPlaybackState('pause', true);
       return;
     }
 
@@ -565,6 +610,7 @@ function bindVideoEvents() {
       STATE.autoClickAttempts = 999;
     }
     updateControlBar();
+    reportPlaybackState('pause', true);
   });
 
   video.addEventListener('ratechange', () => {
@@ -572,10 +618,20 @@ function bindVideoEvents() {
       video.playbackRate = STATE.playbackRate;
     }
     updateControlBar();
+    reportPlaybackState('ratechange', true);
   });
-  video.addEventListener('timeupdate', updateControlBar);
-  video.addEventListener('loadedmetadata', updateControlBar);
-  video.addEventListener('durationchange', updateControlBar);
+  video.addEventListener('timeupdate', () => {
+    updateControlBar();
+    reportPlaybackState('timeupdate');
+  });
+  video.addEventListener('loadedmetadata', () => {
+    updateControlBar();
+    reportPlaybackState('loadedmetadata', true);
+  });
+  video.addEventListener('durationchange', () => {
+    updateControlBar();
+    reportPlaybackState('durationchange', true);
+  });
 }
 
 function tryPlayVideo() {
@@ -638,6 +694,7 @@ function boot() {
   bindVideoEvents();
   bindSpeedMenuDismiss();
   bindMouseStealth();
+  window.addEventListener('beforeunload', () => reportPlaybackState('beforeunload', true));
 
   const observer = new MutationObserver(() => {
     injectStyle();
@@ -652,6 +709,7 @@ function boot() {
 
   window.setInterval(tryClickBilibiliPlay, 800);
   window.setInterval(updateControlBar, 250);
+  window.setInterval(() => reportPlaybackState('interval'), 1000);
 }
 
 ipcRenderer.on('stealth:loaded', () => {

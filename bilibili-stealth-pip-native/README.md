@@ -30,6 +30,14 @@ POST http://127.0.0.1:39877/open
 }
 ```
 
+小窗播放时会持续向主进程上报 `<video>.currentTime`，本地桥接同时提供：
+
+```text
+GET http://127.0.0.1:39877/playback-state
+```
+
+扩展会轮询这个接口，把小窗最新进度同步回原 B 站网页视频；关闭小窗后再次点击“透明”会从同步后的进度继续。
+
 ## 透明行为
 
 - 窗口属性：`transparent: true`、`frame: false`、`alwaysOnTop: true`

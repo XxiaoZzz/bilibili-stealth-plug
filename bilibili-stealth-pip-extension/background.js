@@ -18,27 +18,62 @@ async function postToNativeBridge(path, payload) {
   return data;
 }
 
+async function getFromNativeBridge(path) {
+  const response = await fetch(`${BRIDGE_BASE_URL}${path}`, {
+    method: 'GET'
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.ok === false) {
+    throw new Error(data.error || `native bridge returned HTTP ${response.status}`);
+  }
+  return data;
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (!message || message.type !== 'OPEN_NATIVE_STEALTH_PIP') {
+  if (!message) {
     return false;
   }
 
-  postToNativeBridge('/open', {
-    url: message.url,
-    title: message.title || sender.tab?.title || ''
-  })
-    .then((data) => {
-      sendResponse({
-        ok: true,
-        data
-      });
+  if (message.type === 'OPEN_NATIVE_STEALTH_PIP') {
+    postToNativeBridge('/open', {
+      url: message.url,
+      title: message.title || sender.tab?.title || '',
+      sessionId: message.sessionId || ''
     })
-    .catch((error) => {
-      sendResponse({
-        ok: false,
-        error: error.message || String(error)
+      .then((data) => {
+        sendResponse({
+          ok: true,
+          data
+        });
+      })
+      .catch((error) => {
+        sendResponse({
+          ok: false,
+          error: error.message || String(error)
+        });
       });
-    });
 
-  return true;
+    return true;
+  }
+
+  if (message.type === 'GET_NATIVE_STEALTH_PIP_PLAYBACK') {
+    getFromNativeBridge('/playback-state')
+      .then((data) => {
+        sendResponse({
+          ok: true,
+          data
+        });
+      })
+      .catch((error) => {
+        sendResponse({
+          ok: false,
+          error: error.message || String(error)
+        });
+      });
+
+    return true;
+  }
+
+  return false;
 });
