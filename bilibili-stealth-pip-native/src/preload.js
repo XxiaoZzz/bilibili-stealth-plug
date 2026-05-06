@@ -12,6 +12,7 @@ const STATE = {
   danmakuVisible: true,
   userPaused: false,
   playbackRate: 1,
+  speedMenuOpen: false,
   stealthAutoPaused: false,
   suppressNextPauseAsUser: false,
   boundVideo: null
@@ -123,6 +124,42 @@ function injectStyle() {
       width: 100%;
     }
 
+    .bspip-native-speed-wrap {
+      display: inline-flex;
+      position: relative;
+      -webkit-app-region: no-drag;
+    }
+
+    .bspip-native-speed-menu {
+      background: rgba(10, 10, 10, 0.92);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 12px;
+      bottom: 34px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.38);
+      display: grid;
+      gap: 6px;
+      grid-template-columns: repeat(2, minmax(48px, auto));
+      padding: 8px;
+      position: absolute;
+      right: 0;
+      z-index: 2147483647;
+      -webkit-app-region: no-drag;
+    }
+
+    .bspip-native-speed-menu[hidden] {
+      display: none !important;
+    }
+
+    .bspip-native-speed-option {
+      min-width: 48px;
+      text-align: center;
+    }
+
+    .bspip-native-speed-option.is-active {
+      background: rgba(0, 174, 236, 0.9);
+      border-color: rgba(0, 174, 236, 0.95);
+    }
+
     html.bspip-native-danmaku-off .bpx-player-render-dm-wrap,
     html.bspip-native-danmaku-off .bpx-player-dm-mask-wrap,
     html.bspip-native-danmaku-off .bpx-player-adv-dm-wrap,
@@ -215,6 +252,11 @@ function injectToolbar() {
   (document.body || document.documentElement).appendChild(toolbar);
 }
 
+function renderSpeedOptions() {
+  return SPEED_RATES.map((rate) => `
+      <button class="bspip-native-button bspip-native-speed-option" data-speed="${rate}" type="button">${formatPlaybackRate(rate)}</button>`).join('');
+}
+
 function injectControlBar() {
   if (document.querySelector('.bspip-native-controlbar')) {
     return;
@@ -227,11 +269,23 @@ function injectControlBar() {
     <span class="bspip-native-time bspip-native-current">00:00</span>
     <input class="bspip-native-progress" type="range" min="0" max="1000" step="1" value="0" aria-label="视频进度">
     <span class="bspip-native-time bspip-native-duration">--:--</span>
-    <button class="bspip-native-button bspip-native-speed-toggle" data-action="speed" title="点击切换倍速：0.75 / 1 / 1.25 / 1.5 / 2 / 3 / 4 / 5" type="button">1x</button>
+    <span class="bspip-native-speed-wrap">
+      <button aria-expanded="false" class="bspip-native-button bspip-native-speed-toggle" data-action="speed-menu" title="选择倍速" type="button">1x</button>
+      <span class="bspip-native-speed-menu" hidden>${renderSpeedOptions()}
+      </span>
+    </span>
     <button class="bspip-native-button bspip-native-danmaku-toggle" data-action="danmaku" type="button">弹幕开</button>
   `;
 
   controlbar.addEventListener('click', (event) => {
+    const speedValue = event.target?.dataset?.speed;
+    if (speedValue) {
+      setPlaybackRate(Number(speedValue));
+      setSpeedMenuOpen(false);
+      updateControlBar();
+      return;
+    }
+
     const action = event.target?.dataset?.action;
     if (action === 'play') {
       togglePlay();
@@ -239,8 +293,8 @@ function injectControlBar() {
     if (action === 'danmaku') {
       toggleDanmaku();
     }
-    if (action === 'speed') {
-      cyclePlaybackRate();
+    if (action === 'speed-menu') {
+      setSpeedMenuOpen(!STATE.speedMenuOpen);
     }
   });
 
@@ -303,17 +357,6 @@ function formatPlaybackRate(rate) {
   return `${Number(rate).toFixed(2).replace(/\.?0+$/, '')}x`;
 }
 
-function findRateIndex(rate) {
-  const normalized = Number(rate);
-  const exactIndex = SPEED_RATES.findIndex((candidate) => Math.abs(candidate - normalized) < 0.001);
-  if (exactIndex !== -1) {
-    return exactIndex;
-  }
-
-  const nextHigherIndex = SPEED_RATES.findIndex((candidate) => candidate > normalized);
-  return nextHigherIndex === -1 ? SPEED_RATES.length - 1 : Math.max(0, nextHigherIndex - 1);
-}
-
 function setPlaybackRate(rate) {
   const normalized = SPEED_RATES.includes(rate) ? rate : 1;
   STATE.playbackRate = normalized;
@@ -326,17 +369,24 @@ function setPlaybackRate(rate) {
   const button = document.querySelector('.bspip-native-speed-toggle');
   if (button) {
     button.textContent = formatPlaybackRate(normalized);
-    button.title = `当前倍速 ${formatPlaybackRate(normalized)}，点击切换：${SPEED_RATES.map(formatPlaybackRate).join(' / ')}`;
+    button.title = `当前倍速 ${formatPlaybackRate(normalized)}，点击选择倍速`;
   }
+
+  document.querySelectorAll('.bspip-native-speed-option').forEach((option) => {
+    option.classList.toggle('is-active', Math.abs(Number(option.dataset.speed) - normalized) < 0.001);
+  });
 }
 
-function cyclePlaybackRate() {
-  const video = getVideo();
-  const currentRate = video ? video.playbackRate : STATE.playbackRate;
-  const currentIndex = findRateIndex(currentRate);
-  const nextRate = SPEED_RATES[(currentIndex + 1) % SPEED_RATES.length];
-  setPlaybackRate(nextRate);
-  updateControlBar();
+function setSpeedMenuOpen(open) {
+  STATE.speedMenuOpen = Boolean(open);
+  const menu = document.querySelector('.bspip-native-speed-menu');
+  const button = document.querySelector('.bspip-native-speed-toggle');
+  if (menu) {
+    menu.hidden = !STATE.speedMenuOpen;
+  }
+  if (button) {
+    button.setAttribute('aria-expanded', String(STATE.speedMenuOpen));
+  }
 }
 
 
@@ -469,6 +519,14 @@ function setHidden(hidden) {
   }
 }
 
+function bindSpeedMenuDismiss() {
+  document.addEventListener('pointerdown', (event) => {
+    if (!event.target?.closest?.('.bspip-native-speed-wrap')) {
+      setSpeedMenuOpen(false);
+    }
+  }, { passive: true });
+}
+
 function bindMouseStealth() {
   window.addEventListener('mouseenter', () => setHidden(false));
   window.addEventListener('mousemove', () => setHidden(false), { passive: true });
@@ -578,6 +636,7 @@ function boot() {
   injectToolbar();
   injectControlBar();
   bindVideoEvents();
+  bindSpeedMenuDismiss();
   bindMouseStealth();
 
   const observer = new MutationObserver(() => {
