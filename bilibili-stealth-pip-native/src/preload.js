@@ -2,6 +2,8 @@
 
 const { ipcRenderer } = require('electron');
 
+const SPEED_RATES = [0.75, 1, 1.25, 1.5, 2, 3, 4, 5];
+
 const STATE = {
   ready: false,
   hidden: false,
@@ -9,6 +11,7 @@ const STATE = {
   scrubbing: false,
   danmakuVisible: true,
   userPaused: false,
+  playbackRate: 1,
   stealthAutoPaused: false,
   suppressNextPauseAsUser: false,
   boundVideo: null
@@ -81,7 +84,7 @@ function injectStyle() {
       color: #fff;
       display: grid;
       gap: 8px;
-      grid-template-columns: auto auto 1fr auto auto;
+      grid-template-columns: auto auto 1fr auto auto auto;
       left: 0;
       opacity: 0;
       padding: 22px 10px 9px;
@@ -224,6 +227,7 @@ function injectControlBar() {
     <span class="bspip-native-time bspip-native-current">00:00</span>
     <input class="bspip-native-progress" type="range" min="0" max="1000" step="1" value="0" aria-label="视频进度">
     <span class="bspip-native-time bspip-native-duration">--:--</span>
+    <button class="bspip-native-button bspip-native-speed-toggle" data-action="speed" title="点击切换倍速：0.75 / 1 / 1.25 / 1.5 / 2 / 3 / 4 / 5" type="button">1x</button>
     <button class="bspip-native-button bspip-native-danmaku-toggle" data-action="danmaku" type="button">弹幕开</button>
   `;
 
@@ -234,6 +238,9 @@ function injectControlBar() {
     }
     if (action === 'danmaku') {
       toggleDanmaku();
+    }
+    if (action === 'speed') {
+      cyclePlaybackRate();
     }
   });
 
@@ -292,6 +299,47 @@ function seekFromProgress(progress) {
   updateControlBar();
 }
 
+function formatPlaybackRate(rate) {
+  return `${Number(rate).toFixed(2).replace(/\.?0+$/, '')}x`;
+}
+
+function findRateIndex(rate) {
+  const normalized = Number(rate);
+  const exactIndex = SPEED_RATES.findIndex((candidate) => Math.abs(candidate - normalized) < 0.001);
+  if (exactIndex !== -1) {
+    return exactIndex;
+  }
+
+  const nextHigherIndex = SPEED_RATES.findIndex((candidate) => candidate > normalized);
+  return nextHigherIndex === -1 ? SPEED_RATES.length - 1 : Math.max(0, nextHigherIndex - 1);
+}
+
+function setPlaybackRate(rate) {
+  const normalized = SPEED_RATES.includes(rate) ? rate : 1;
+  STATE.playbackRate = normalized;
+
+  const video = getVideo();
+  if (video && Math.abs(video.playbackRate - normalized) > 0.001) {
+    video.playbackRate = normalized;
+  }
+
+  const button = document.querySelector('.bspip-native-speed-toggle');
+  if (button) {
+    button.textContent = formatPlaybackRate(normalized);
+    button.title = `当前倍速 ${formatPlaybackRate(normalized)}，点击切换：${SPEED_RATES.map(formatPlaybackRate).join(' / ')}`;
+  }
+}
+
+function cyclePlaybackRate() {
+  const video = getVideo();
+  const currentRate = video ? video.playbackRate : STATE.playbackRate;
+  const currentIndex = findRateIndex(currentRate);
+  const nextRate = SPEED_RATES[(currentIndex + 1) % SPEED_RATES.length];
+  setPlaybackRate(nextRate);
+  updateControlBar();
+}
+
+
 function togglePlay() {
   const video = getVideo();
   if (!video) {
@@ -333,6 +381,7 @@ function updateControlBar() {
   const duration = controlbar.querySelector('.bspip-native-duration');
   const progress = controlbar.querySelector('.bspip-native-progress');
   const play = controlbar.querySelector('.bspip-native-play');
+  const speed = controlbar.querySelector('.bspip-native-speed-toggle');
 
   if (current) {
     current.textContent = formatTime(video.currentTime);
@@ -347,6 +396,12 @@ function updateControlBar() {
   }
   if (play) {
     play.textContent = video.paused ? '播放' : '暂停';
+  }
+  if (speed) {
+    speed.textContent = formatPlaybackRate(STATE.playbackRate);
+  }
+  if (Math.abs(video.playbackRate - STATE.playbackRate) > 0.001) {
+    video.playbackRate = STATE.playbackRate;
   }
 }
 
@@ -432,6 +487,7 @@ function bindVideoEvents() {
   }
 
   STATE.boundVideo = video;
+  setPlaybackRate(STATE.playbackRate);
 
   video.addEventListener('play', () => {
     STATE.userPaused = false;
@@ -453,6 +509,12 @@ function bindVideoEvents() {
     updateControlBar();
   });
 
+  video.addEventListener('ratechange', () => {
+    if (Math.abs(video.playbackRate - STATE.playbackRate) > 0.001) {
+      video.playbackRate = STATE.playbackRate;
+    }
+    updateControlBar();
+  });
   video.addEventListener('timeupdate', updateControlBar);
   video.addEventListener('loadedmetadata', updateControlBar);
   video.addEventListener('durationchange', updateControlBar);
