@@ -3,6 +3,10 @@
 const { ipcRenderer } = require('electron');
 
 const SPEED_RATES = [0.75, 1, 1.25, 1.5, 2, 3, 4, 5];
+const MIN_BRIGHTNESS = 0.5;
+const MAX_BRIGHTNESS = 1.5;
+const MIN_VISIBLE_OPACITY = 0.2;
+const MAX_VISIBLE_OPACITY = 1;
 
 const STATE = {
   ready: false,
@@ -16,7 +20,9 @@ const STATE = {
   stealthAutoPaused: false,
   suppressNextPauseAsUser: false,
   lastPlaybackReportAt: 0,
-  boundVideo: null
+  boundVideo: null,
+  brightness: 1,
+  visibleOpacity: 1
 };
 
 function injectStyle() {
@@ -29,6 +35,7 @@ function injectStyle() {
   style.textContent = `
     html.bspip-native-ready,
     html.bspip-native-ready body {
+      --bspip-video-brightness: 1;
       background: transparent !important;
       overflow: hidden !important;
     }
@@ -86,7 +93,7 @@ function injectStyle() {
       color: #fff;
       display: grid;
       gap: 8px;
-      grid-template-columns: auto auto 1fr auto auto auto;
+      grid-template-columns: auto auto 1fr auto auto auto auto auto;
       left: 0;
       opacity: 0;
       padding: 22px 10px 9px;
@@ -125,7 +132,8 @@ function injectStyle() {
       width: 100%;
     }
 
-    .bspip-native-speed-wrap {
+    .bspip-native-speed-wrap,
+    .bspip-native-popup-wrap {
       display: inline-flex;
       position: relative;
       -webkit-app-region: no-drag;
@@ -159,6 +167,64 @@ function injectStyle() {
     .bspip-native-speed-option.is-active {
       background: rgba(0, 174, 236, 0.9);
       border-color: rgba(0, 174, 236, 0.95);
+    }
+
+    .bspip-native-popup-panel {
+      align-items: center;
+      background: rgba(10, 10, 10, 0.92);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 12px;
+      bottom: 34px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.38);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      left: 50%;
+      opacity: 0;
+      padding: 10px 8px 8px;
+      pointer-events: none;
+      position: absolute;
+      transform: translateX(-50%) translateY(6px);
+      transition: opacity 120ms ease, transform 120ms ease, visibility 120ms ease;
+      visibility: hidden;
+      z-index: 2147483647;
+      -webkit-app-region: no-drag;
+    }
+
+    .bspip-native-popup-wrap:hover .bspip-native-popup-panel,
+    .bspip-native-popup-wrap:focus-within .bspip-native-popup-panel {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateX(-50%) translateY(0);
+      visibility: visible;
+    }
+
+    .bspip-native-slider-shell {
+      align-items: center;
+      display: flex;
+      justify-content: center;
+      min-height: 116px;
+      padding: 2px 0;
+    }
+
+    .bspip-native-vertical-slider {
+      accent-color: #00aeec;
+      cursor: ns-resize;
+      direction: rtl;
+      height: 116px;
+      margin: 0;
+      width: 24px;
+      writing-mode: vertical-lr;
+      -webkit-appearance: slider-vertical;
+    }
+
+    .bspip-native-slider-value {
+      color: rgba(255, 255, 255, 0.92);
+      font: 11px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      min-width: 40px;
+      text-align: center;
+      user-select: none;
+      white-space: nowrap;
     }
 
     html.bspip-native-danmaku-off .bpx-player-render-dm-wrap,
@@ -221,6 +287,7 @@ function injectStyle() {
     }
 
     html.bspip-native-ready video {
+      filter: brightness(var(--bspip-video-brightness, 1)) !important;
       object-fit: contain !important;
       z-index: 2147483600 !important;
     }
@@ -259,6 +326,27 @@ function renderSpeedOptions() {
       <button class="bspip-native-button bspip-native-speed-option" data-speed="${rate}" type="button">${formatPlaybackRate(rate)}</button>`).join('');
 }
 
+function renderSliderPanel({ buttonClassName, buttonLabel, buttonTitle, sliderClassName, sliderLabel, min, max, value }) {
+  return `
+    <span class="bspip-native-popup-wrap">
+      <button class="bspip-native-button ${buttonClassName}" title="${buttonTitle}" type="button">${buttonLabel}</button>
+      <span class="bspip-native-popup-panel" role="group" aria-label="${sliderLabel}">
+        <span class="bspip-native-slider-shell">
+          <input
+            aria-label="${sliderLabel}"
+            class="bspip-native-vertical-slider ${sliderClassName}"
+            type="range"
+            min="${min}"
+            max="${max}"
+            step="1"
+            value="${value}">
+        </span>
+        <span class="bspip-native-slider-value" data-label-for="${sliderClassName}">${buttonLabel}</span>
+      </span>
+    </span>
+  `;
+}
+
 function injectControlBar() {
   if (document.querySelector('.bspip-native-controlbar')) {
     return;
@@ -276,6 +364,26 @@ function injectControlBar() {
       <span class="bspip-native-speed-menu" hidden>${renderSpeedOptions()}
       </span>
     </span>
+    ${renderSliderPanel({
+      buttonClassName: 'bspip-native-brightness-toggle',
+      buttonLabel: '亮100%',
+      buttonTitle: '悬停调节视频亮度',
+      sliderClassName: 'bspip-native-brightness-slider',
+      sliderLabel: '视频亮度',
+      min: 50,
+      max: 150,
+      value: 100
+    })}
+    ${renderSliderPanel({
+      buttonClassName: 'bspip-native-opacity-toggle',
+      buttonLabel: '透100%',
+      buttonTitle: '悬停调节可见状态透明度',
+      sliderClassName: 'bspip-native-opacity-slider',
+      sliderLabel: '可见状态透明度',
+      min: 20,
+      max: 100,
+      value: 100
+    })}
     <button class="bspip-native-button bspip-native-danmaku-toggle" data-action="danmaku" type="button">弹幕开</button>
   `;
 
@@ -318,6 +426,18 @@ function injectControlBar() {
   });
   progress.addEventListener('pointercancel', () => {
     STATE.scrubbing = false;
+    updateControlBar();
+  });
+
+  const brightnessSlider = controlbar.querySelector('.bspip-native-brightness-slider');
+  brightnessSlider?.addEventListener('input', () => {
+    setBrightness(Number(brightnessSlider.value) / 100);
+    updateControlBar();
+  });
+
+  const opacitySlider = controlbar.querySelector('.bspip-native-opacity-slider');
+  opacitySlider?.addEventListener('input', () => {
+    setVisibleOpacity(Number(opacitySlider.value) / 100);
     updateControlBar();
   });
 
@@ -395,6 +515,30 @@ function formatPlaybackRate(rate) {
   return `${Number(rate).toFixed(2).replace(/\.?0+$/, '')}x`;
 }
 
+function clampNumber(value, min, max, fallback) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+  return Math.min(Math.max(numeric, min), max);
+}
+
+function formatPercent(value) {
+  return `${Math.round(Number(value) * 100)}%`;
+}
+
+function setBrightness(value) {
+  STATE.brightness = clampNumber(value, MIN_BRIGHTNESS, MAX_BRIGHTNESS, 1);
+  document.documentElement.style.setProperty('--bspip-video-brightness', STATE.brightness.toFixed(2));
+}
+
+function setVisibleOpacity(value, syncToMain = true) {
+  STATE.visibleOpacity = clampNumber(value, MIN_VISIBLE_OPACITY, MAX_VISIBLE_OPACITY, 1);
+  if (syncToMain) {
+    ipcRenderer.send('stealth:set-visible-opacity', STATE.visibleOpacity);
+  }
+}
+
 function setPlaybackRate(rate) {
   const normalized = SPEED_RATES.includes(rate) ? rate : 1;
   STATE.playbackRate = normalized;
@@ -463,16 +607,55 @@ function toggleDanmaku() {
 
 function updateControlBar() {
   const controlbar = document.querySelector('.bspip-native-controlbar');
-  const video = getVideo();
-  if (!controlbar || !video) {
+  if (!controlbar) {
     return;
   }
 
+  const video = getVideo();
   const current = controlbar.querySelector('.bspip-native-current');
   const duration = controlbar.querySelector('.bspip-native-duration');
   const progress = controlbar.querySelector('.bspip-native-progress');
   const play = controlbar.querySelector('.bspip-native-play');
   const speed = controlbar.querySelector('.bspip-native-speed-toggle');
+  const brightnessButton = controlbar.querySelector('.bspip-native-brightness-toggle');
+  const brightnessSlider = controlbar.querySelector('.bspip-native-brightness-slider');
+  const brightnessValue = controlbar.querySelector('[data-label-for="bspip-native-brightness-slider"]');
+  const opacityButton = controlbar.querySelector('.bspip-native-opacity-toggle');
+  const opacitySlider = controlbar.querySelector('.bspip-native-opacity-slider');
+  const opacityValue = controlbar.querySelector('[data-label-for="bspip-native-opacity-slider"]');
+
+  const brightnessText = `亮${formatPercent(STATE.brightness)}`;
+  const opacityText = `透${formatPercent(STATE.visibleOpacity)}`;
+
+  if (brightnessButton) {
+    brightnessButton.textContent = brightnessText;
+    brightnessButton.title = `当前亮度 ${formatPercent(STATE.brightness)}，悬停调节视频亮度`;
+  }
+  if (brightnessSlider) {
+    brightnessSlider.value = String(Math.round(STATE.brightness * 100));
+  }
+  if (brightnessValue) {
+    brightnessValue.textContent = brightnessText;
+  }
+
+  if (opacityButton) {
+    opacityButton.textContent = opacityText;
+    opacityButton.title = `当前透明度 ${formatPercent(STATE.visibleOpacity)}，悬停调节可见状态透明度`;
+  }
+  if (opacitySlider) {
+    opacitySlider.value = String(Math.round(STATE.visibleOpacity * 100));
+  }
+  if (opacityValue) {
+    opacityValue.textContent = opacityText;
+  }
+
+  if (speed) {
+    speed.textContent = formatPlaybackRate(STATE.playbackRate);
+  }
+
+  if (!video) {
+    return;
+  }
 
   if (current) {
     current.textContent = formatTime(video.currentTime);
@@ -487,9 +670,6 @@ function updateControlBar() {
   }
   if (play) {
     play.textContent = video.paused ? '播放' : '暂停';
-  }
-  if (speed) {
-    speed.textContent = formatPlaybackRate(STATE.playbackRate);
   }
   if (Math.abs(video.playbackRate - STATE.playbackRate) > 0.001) {
     video.playbackRate = STATE.playbackRate;
@@ -588,6 +768,7 @@ function bindVideoEvents() {
   }
 
   STATE.boundVideo = video;
+  setBrightness(STATE.brightness);
   setPlaybackRate(STATE.playbackRate);
 
   video.addEventListener('play', () => {
@@ -687,6 +868,7 @@ function boot() {
   }
 
   STATE.ready = true;
+  setBrightness(STATE.brightness);
   document.documentElement.classList.add('bspip-native-ready');
   injectStyle();
   injectToolbar();
@@ -712,8 +894,12 @@ function boot() {
   window.setInterval(() => reportPlaybackState('interval'), 1000);
 }
 
-ipcRenderer.on('stealth:loaded', () => {
+ipcRenderer.on('stealth:loaded', (_event, payload) => {
+  if (payload && Number.isFinite(Number(payload.visibleOpacity))) {
+    setVisibleOpacity(Number(payload.visibleOpacity), false);
+  }
   boot();
+  updateControlBar();
 });
 
 ipcRenderer.on('stealth:state', (_event, payload) => {

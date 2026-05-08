@@ -9,7 +9,9 @@ const HOST = '127.0.0.1';
 const PORT = 39877;
 const DEFAULT_WIDTH = 560;
 const DEFAULT_HEIGHT = 315;
-const VISIBLE_OPACITY = 1;
+const DEFAULT_VISIBLE_OPACITY = 1;
+const MIN_VISIBLE_OPACITY = 0.2;
+const MAX_VISIBLE_OPACITY = 1;
 const HIDDEN_OPACITY = 0;
 const POINTER_POLL_INTERVAL_MS = 80;
 const OPEN_REVEAL_MS = 2400;
@@ -29,6 +31,7 @@ let forceVisibleUntil = 0;
 let keepAliveTimer = null;
 let activeSessionId = null;
 let lastPlaybackState = null;
+let visibleOpacity = DEFAULT_VISIBLE_OPACITY;
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling');
@@ -120,16 +123,30 @@ function pointInBounds(point, bounds) {
   );
 }
 
+function clampOpacity(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return DEFAULT_VISIBLE_OPACITY;
+  }
+  return Math.min(Math.max(numeric, MIN_VISIBLE_OPACITY), MAX_VISIBLE_OPACITY);
+}
+
+function getTargetOpacity(hidden) {
+  return hidden ? HIDDEN_OPACITY : visibleOpacity;
+}
+
 function applyWindowOpacity(win, hidden, reason) {
   if (!win || win.isDestroyed()) {
     return;
   }
-  if (pointerHidden === hidden && win.getOpacity() === (hidden ? HIDDEN_OPACITY : VISIBLE_OPACITY)) {
+
+  const targetOpacity = getTargetOpacity(hidden);
+  if (pointerHidden === hidden && Math.abs(win.getOpacity() - targetOpacity) < 0.001) {
     return;
   }
 
   pointerHidden = hidden;
-  win.setOpacity(hidden ? HIDDEN_OPACITY : VISIBLE_OPACITY);
+  win.setOpacity(targetOpacity);
   win.webContents.send('stealth:state', { hidden });
   console.log(`[Bilibili Stealth PiP Native] ${hidden ? 'hidden' : 'visible'} by ${reason}`);
 }
@@ -233,7 +250,7 @@ function createPlayerWindow() {
     playerWindow.setAlwaysOnTop(true, 'screen-saver', 1);
     playerWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   }
-  playerWindow.setOpacity(VISIBLE_OPACITY);
+  playerWindow.setOpacity(visibleOpacity);
   pointerHidden = false;
   startPointerWatcher(playerWindow);
 
@@ -245,7 +262,7 @@ function createPlayerWindow() {
   const notifyRendererLoaded = () => {
     playerWindow?.webContents.send('stealth:loaded', {
       hiddenOpacity: HIDDEN_OPACITY,
-      visibleOpacity: VISIBLE_OPACITY
+      visibleOpacity
     });
   };
 
@@ -348,6 +365,7 @@ function startBridgeServer() {
         app: 'bilibili-stealth-pip-native',
         hasWindow: Boolean(playerWindow && !playerWindow.isDestroyed()),
         hidden: pointerHidden,
+        visibleOpacity,
         sessionId: activeSessionId,
         playbackState: lastPlaybackState
       });
@@ -362,6 +380,7 @@ function startBridgeServer() {
         hasWindow: Boolean(playerWindow && !playerWindow.isDestroyed()),
         hidden: pointerHidden,
         sessionId: activeSessionId,
+        visibleOpacity,
         opacity: playerWindow && !playerWindow.isDestroyed() ? playerWindow.getOpacity() : null,
         cursor,
         bounds,
@@ -413,6 +432,18 @@ ipcMain.on('stealth:set-hidden', (event, isHidden) => {
     return;
   }
   applyWindowOpacity(win, Boolean(isHidden), 'renderer-event');
+});
+
+ipcMain.on('stealth:set-visible-opacity', (event, value) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win || win.isDestroyed() || win !== playerWindow) {
+    return;
+  }
+
+  visibleOpacity = clampOpacity(value);
+  if (!pointerHidden) {
+    win.setOpacity(visibleOpacity);
+  }
 });
 
 ipcMain.on('stealth:close', (event) => {
