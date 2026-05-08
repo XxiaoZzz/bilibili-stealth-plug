@@ -2,6 +2,8 @@
 
 这是和 Chrome 扩展配套的 Electron 本地透明置顶窗口。
 
+版本更新记录见仓库根目录 `CHANGELOG.md`。
+
 ## 启动
 
 ```bash

@@ -33,8 +33,9 @@
 │   ├── package.json                  # Electron 项目配置
 │   ├── package-lock.json             # npm 锁定文件
 │   ├── src/main.js                   # 主进程：HTTP 桥接、窗口透明、置顶、鼠标检测
-│   ├── src/preload.js                # 注入 B 站页：控制条、进度条、倍速按钮、弹幕开关
+│   ├── src/preload.js                # 注入 B 站页：控制条、进度条、倍速/亮度/透明度、弹幕开关
 │   └── README.md                     # 本地 helper 单独说明
+├── CHANGELOG.md                     # 版本更新记录
 ├── .gitignore
 └── README.md                         # 当前文件
 ```
@@ -53,6 +54,11 @@ flowchart LR
 ```
 
 浏览器扩展只负责把当前 B 站视频 URL 交给本地程序。真正的透明和置顶由 Electron 原生窗口完成。
+
+## 更新记录
+
+- 最新版本记录见根目录 [`CHANGELOG.md`](./CHANGELOG.md)。
+- 如果你是从 GitHub Releases 下载压缩包，建议优先对照对应版本的 release 说明和 `CHANGELOG.md`。
 
 ## 使用前准备
 
