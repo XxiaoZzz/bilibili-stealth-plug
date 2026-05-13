@@ -1,6 +1,6 @@
 {
   "name": "bilibili-stealth-pip-native",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Native transparent always-on-top helper for Bilibili stealth PiP.",
   "main": "src/main.js",
   "private": true,
