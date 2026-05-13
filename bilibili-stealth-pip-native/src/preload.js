@@ -21,6 +21,10 @@ const STATE = {
   suppressNextPauseAsUser: false,
   lastPlaybackReportAt: 0,
   boundVideo: null,
+  observer: null,
+  domRefreshTimer: null,
+  intervalIds: [],
+  standby: null,
   brightness: 1,
   visibleOpacity: 1
 };
@@ -459,7 +463,10 @@ function collectPlaybackState(reason) {
       duration: null,
       paused: true,
       ended: false,
-      playbackRate: STATE.playbackRate
+      playbackRate: STATE.playbackRate,
+      brightness: STATE.brightness,
+      visibleOpacity: STATE.visibleOpacity,
+      danmakuVisible: STATE.danmakuVisible
     };
   }
 
@@ -470,7 +477,10 @@ function collectPlaybackState(reason) {
     duration: Number.isFinite(video.duration) ? video.duration : null,
     paused: video.paused,
     ended: video.ended,
-    playbackRate: Number.isFinite(video.playbackRate) ? video.playbackRate : STATE.playbackRate
+    playbackRate: Number.isFinite(video.playbackRate) ? video.playbackRate : STATE.playbackRate,
+    brightness: STATE.brightness,
+    visibleOpacity: STATE.visibleOpacity,
+    danmakuVisible: STATE.danmakuVisible
   };
 }
 
@@ -742,6 +752,169 @@ function setHidden(hidden) {
   }
 }
 
+function scheduleDomRefresh() {
+  if (STATE.domRefreshTimer) {
+    return;
+  }
+
+  STATE.domRefreshTimer = window.setTimeout(() => {
+    STATE.domRefreshTimer = null;
+    injectStyle();
+    injectToolbar();
+    injectControlBar();
+    bindVideoEvents();
+  }, 250);
+}
+
+function addInterval(callback, delay) {
+  const intervalId = window.setInterval(callback, delay);
+  STATE.intervalIds.push(intervalId);
+  return intervalId;
+}
+
+function cleanupRuntime(reason = 'cleanup') {
+  if (STATE.standby?.timer) {
+    window.clearTimeout(STATE.standby.timer);
+  }
+  if (STATE.domRefreshTimer) {
+    window.clearTimeout(STATE.domRefreshTimer);
+    STATE.domRefreshTimer = null;
+  }
+  if (STATE.observer) {
+    STATE.observer.disconnect();
+    STATE.observer = null;
+  }
+  STATE.intervalIds.forEach((intervalId) => window.clearInterval(intervalId));
+  STATE.intervalIds = [];
+  STATE.boundVideo = null;
+  STATE.standby = null;
+  reportPlaybackState(reason, true);
+}
+
+function getStandbyTargetTime() {
+  const targetTime = Number(STATE.standby?.targetTime);
+  return Number.isFinite(targetTime) && targetTime >= 0 ? targetTime : 0;
+}
+
+function clearStandbyProbe() {
+  if (STATE.standby?.timer) {
+    window.clearTimeout(STATE.standby.timer);
+    STATE.standby.timer = null;
+  }
+}
+
+function sendStandbyReady() {
+  if (!STATE.standby || STATE.standby.readySent) {
+    return;
+  }
+
+  STATE.standby.readySent = true;
+  ipcRenderer.send('stealth:standby-ready', {
+    token: STATE.standby.token,
+    state: collectPlaybackState('standby-ready')
+  });
+}
+
+function probeStandbyReadiness() {
+  if (!STATE.standby) {
+    return;
+  }
+
+  const video = getVideo();
+  bindVideoEvents();
+
+  if (!video) {
+    STATE.standby.timer = window.setTimeout(probeStandbyReadiness, 250);
+    return;
+  }
+
+  const targetTime = getStandbyTargetTime();
+  video.muted = true;
+  video.volume = 0;
+  setPlaybackRate(STATE.standby.playbackRate);
+
+  if (Number.isFinite(video.duration) && video.duration > 0) {
+    const clampedTarget = Math.min(targetTime, Math.max(video.duration - 0.2, 0));
+    if (Math.abs(video.currentTime - clampedTarget) > 0.75) {
+      video.currentTime = clampedTarget;
+    }
+  }
+
+  if (STATE.standby.shouldPlay && video.paused) {
+    video.play().catch(() => {
+      const playButton = document.querySelector('.bpx-player-ctrl-play, .bilibili-player-video-btn-start');
+      playButton?.click();
+    });
+  }
+
+  const hasFrame = video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
+  const canReportPaused = !STATE.standby.shouldPlay;
+  if (hasFrame && (canReportPaused || !video.paused)) {
+    sendStandbyReady();
+    return;
+  }
+
+  STATE.standby.timer = window.setTimeout(probeStandbyReadiness, 250);
+}
+
+function prepareStandby(payload = {}) {
+  const token = typeof payload.token === 'string' ? payload.token : '';
+  if (!token) {
+    return;
+  }
+
+  clearStandbyProbe();
+  STATE.standby = {
+    token,
+    targetTime: Number(payload.targetTime),
+    playbackRate: SPEED_RATES.includes(Number(payload.playbackRate)) ? Number(payload.playbackRate) : STATE.playbackRate,
+    shouldPlay: payload.shouldPlay !== false,
+    readySent: false,
+    timer: null
+  };
+  STATE.userPaused = !STATE.standby.shouldPlay;
+  STATE.hidden = false;
+  STATE.stealthAutoPaused = false;
+  STATE.suppressNextPauseAsUser = false;
+
+  if (Number.isFinite(Number(payload.brightness))) {
+    setBrightness(Number(payload.brightness));
+  }
+  if (Number.isFinite(Number(payload.visibleOpacity))) {
+    setVisibleOpacity(Number(payload.visibleOpacity), false);
+  }
+  if (typeof payload.danmakuVisible === 'boolean') {
+    setDanmakuVisible(payload.danmakuVisible);
+  }
+
+  document.documentElement.classList.remove('bspip-native-hidden');
+  probeStandbyReadiness();
+}
+
+function promoteStandby(payload = {}) {
+  const shouldPlay = payload.shouldPlay !== false;
+  clearStandbyProbe();
+  STATE.standby = null;
+  if (Number.isFinite(Number(payload.visibleOpacity))) {
+    setVisibleOpacity(Number(payload.visibleOpacity), false);
+  }
+
+  applyHiddenState(Boolean(payload.hidden));
+  const video = getVideo();
+  if (!video) {
+    return;
+  }
+
+  video.muted = Boolean(payload.hidden);
+  if (!payload.hidden) {
+    video.volume = Math.max(video.volume || 0, 0.6);
+  }
+  if (shouldPlay && !payload.hidden && video.paused) {
+    video.play().catch(() => {});
+  }
+  reportPlaybackState('standby-promoted', true);
+}
+
 function bindSpeedMenuDismiss() {
   document.addEventListener('pointerdown', (event) => {
     if (!event.target?.closest?.('.bspip-native-speed-wrap')) {
@@ -822,8 +995,13 @@ function tryPlayVideo() {
     return;
   }
 
-  video.muted = false;
-  video.volume = Math.max(video.volume || 0, 0.6);
+  if (STATE.standby) {
+    video.muted = true;
+    video.volume = 0;
+  } else {
+    video.muted = false;
+    video.volume = Math.max(video.volume || 0, 0.6);
+  }
   if (!video.paused) {
     STATE.autoClickAttempts = 999;
     return;
@@ -876,22 +1054,21 @@ function boot() {
   bindVideoEvents();
   bindSpeedMenuDismiss();
   bindMouseStealth();
-  window.addEventListener('beforeunload', () => reportPlaybackState('beforeunload', true));
+  window.addEventListener('beforeunload', () => cleanupRuntime('beforeunload'), { once: true });
+  window.addEventListener('pagehide', () => cleanupRuntime('pagehide'), { once: true });
 
   const observer = new MutationObserver(() => {
-    injectStyle();
-    injectToolbar();
-    injectControlBar();
-    bindVideoEvents();
+    scheduleDomRefresh();
   });
   observer.observe(document.documentElement, {
     childList: true,
     subtree: true
   });
+  STATE.observer = observer;
 
-  window.setInterval(tryClickBilibiliPlay, 800);
-  window.setInterval(updateControlBar, 250);
-  window.setInterval(() => reportPlaybackState('interval'), 1000);
+  addInterval(tryClickBilibiliPlay, 800);
+  addInterval(updateControlBar, 250);
+  addInterval(() => reportPlaybackState('interval'), 1000);
 }
 
 ipcRenderer.on('stealth:loaded', (_event, payload) => {
@@ -904,6 +1081,14 @@ ipcRenderer.on('stealth:loaded', (_event, payload) => {
 
 ipcRenderer.on('stealth:state', (_event, payload) => {
   applyHiddenState(Boolean(payload?.hidden));
+});
+
+ipcRenderer.on('stealth:prepare-standby', (_event, payload) => {
+  prepareStandby(payload);
+});
+
+ipcRenderer.on('stealth:promote-standby', (_event, payload) => {
+  promoteStandby(payload);
 });
 
 if (document.readyState === 'loading') {

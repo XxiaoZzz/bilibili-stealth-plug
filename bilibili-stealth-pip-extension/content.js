@@ -19,6 +19,8 @@
   let playbackSyncTimer = null;
   let playbackSyncFailures = 0;
   let syncedSourceVideo = null;
+  let buttonObserver = null;
+  let injectButtonTimer = null;
 
   function showToast(message) {
     const oldToast = document.querySelector('.bspip-toast');
@@ -136,6 +138,31 @@
     }
   }
 
+  function scheduleInjectButton() {
+    if (injectButtonTimer) {
+      return;
+    }
+
+    injectButtonTimer = window.setTimeout(() => {
+      injectButtonTimer = null;
+      injectButton();
+    }, 250);
+  }
+
+  function cleanup() {
+    stopPlaybackSync(false);
+    if (injectButtonTimer) {
+      window.clearTimeout(injectButtonTimer);
+      injectButtonTimer = null;
+    }
+    if (buttonObserver) {
+      buttonObserver.disconnect();
+      buttonObserver = null;
+    }
+    syncedSourceVideo = null;
+    activeButton = null;
+  }
+
   function startPlaybackSync(sessionId) {
     stopPlaybackSync(false);
     activeSessionId = sessionId;
@@ -240,13 +267,19 @@
   }
 
   function startObserver() {
+    if (buttonObserver) {
+      return;
+    }
+
     injectButton();
-    const observer = new MutationObserver(() => injectButton());
-    observer.observe(document.documentElement, {
+    buttonObserver = new MutationObserver(() => scheduleInjectButton());
+    buttonObserver.observe(document.documentElement, {
       childList: true,
       subtree: true
     });
   }
+
+  window.addEventListener('pagehide', cleanup, { once: true });
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', startObserver, { once: true });
